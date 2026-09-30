@@ -1,6 +1,7 @@
 """P-47II MD タイトル画面差し替え用アセットを生成する.
 
-入力: assets/title_bg.jpg (BG 元絵), assets/P47_logo.png (ロゴ), assets/font_title.txt (フォント)
+入力: assets/title_bg.jpg (BG 元絵), assets/P47_logo_md.png (ロゴ, MD 用ドット絵. 無ければ P47_logo.png から生成),
+      assets/font_title.txt (フォント)
 出力: build/title_data.s (アセンブラ用データ), build/preview_*.png (確認用)
 
 VRAM / パレット割り当て (タイトル画面のみ):
@@ -135,6 +136,22 @@ def make_bg():
 
 # ---------------------------------------------------------------- ロゴ
 def make_logo():
+    """ロゴ -> 画面座標のインデックス, 不透明マスク, パレット.
+
+    assets/P47_logo_md.png (MD 用に手直ししたドット絵) があればそのまま使う.
+    無ければ assets/P47_logo.png を縮小・減色し 1px の白縁を付ける.
+    """
+    md = os.path.join(ASSETS, 'P47_logo_md.png')
+    if os.path.exists(md):
+        a = np.array(Image.open(md).convert('RGBA')).astype(int)
+        assert a.shape[:2] == (56, LOGO_W), a.shape
+        alpha = a[..., 3] >= 128
+        rgb = a[..., :3]
+        assert not (rgb[alpha] % 34).any(), 'MD の色 (0,34,68,...,238) 以外が含まれています'
+        layer = np.full((224, 320, 3), -1, int)
+        ys, xs = np.nonzero(alpha)
+        layer[LOGO_Y + ys, LOGO_X + xs] = rgb[ys, xs] // 34
+        return logo_indexed(layer)
     src = Image.open(os.path.join(ASSETS, 'P47_logo.png')).convert('RGBA')
     h = round(src.height * LOGO_W / src.width)
     lg = src.resize((LOGO_W, h), Image.LANCZOS)
@@ -152,6 +169,11 @@ def make_logo():
     layer[LOGO_Y + ys, LOGO_X + xs] = (7, 7, 7)
     ys, xs = np.nonzero(alpha)
     layer[LOGO_Y + ys, LOGO_X + xs] = q[ys, xs]
+    return logo_indexed(layer)
+
+
+def logo_indexed(layer):
+    """色の段階値レイヤ (-1 = 透明) -> インデックス, 不透明マスク, パレット (PAL1)."""
     opaque = (layer >= 0).all(2)
     cols = sorted({tuple(c) for c in layer[opaque]})
     assert len(cols) <= 15, len(cols)
