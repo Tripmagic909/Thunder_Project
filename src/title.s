@@ -17,6 +17,8 @@
     .equ PLANE_CLEAR,   0x020342    | 元の初期化: プレーン消去
     .equ VDP_DATA,      0xc00000
     .equ VDP_CTRL,      0xc00004
+    .equ SCREEN_FLAGS,  0xffe002    | VDP レジスタ 1 の控え
+    .equ TITLE_MAGIC,   0x50343754  | 'P47T': タイトルのタイルが VRAM に残っている目印
 
     .equ LOGO_OFS,      0x0284      | ロゴ左上 (Plane A 行 5, 列 2)
     .equ LOGO_COLS,     36
@@ -44,8 +46,49 @@ TitleInit:
 2:  move.l  (a0)+,VDP_DATA
     dbra    d7,2b
     bra.s   1b
-3:  movem.l (sp)+,d0/d7/a0-a1
+3:  move.l  #0x7ffc0003,VDP_CTRL    | VRAM 0xFFFC に目印を書く
+    move.l  #TITLE_MAGIC,VDP_DATA
+    movem.l (sp)+,d0/d7/a0-a1
     rts
+
+| ------------------------------------------------------------------
+| 画面初期化の共通処理の先頭 (元: 0x001c82 andi.w #$ffbf,$ffe002).
+| タイトルの後なら, タイトル用に使った「元は 0 / 未使用だった領域」を 0 に戻す.
+| (デモ・ゲームはプレーンを 128x32 にするため, 0xCE00- / 0xEE00- がマップとして使われる)
+TitleExitClear:
+    andi.w  #0xffbf,SCREEN_FLAGS
+    move.w  SCREEN_FLAGS,VDP_CTRL   | 画面表示オフ (元の処理と同じ)
+    move.w  sr,-(sp)
+    ori.w   #0x0700,sr
+    movem.l d0-d1/d7/a0,-(sp)
+    move.l  #0x3ffc0003,VDP_CTRL    | VRAM 0xFFFC を読む
+    move.l  VDP_DATA,d0
+    cmpi.l  #TITLE_MAGIC,d0
+    bne.s   9f
+    lea     ExitClearTable,a0
+    moveq   #0,d1
+1:  move.l  (a0)+,d0
+    beq.s   9f
+    move.w  (a0)+,d7
+    move.l  d0,VDP_CTRL
+2:  move.l  d1,VDP_DATA
+    dbra    d7,2b
+    bra.s   1b
+9:  movem.l (sp)+,d0-d1/d7/a0
+    move.w  (sp)+,sr
+    rts
+
+| 0 に戻す領域: VRAM 書き込みコマンド.l, (long 数 - 1).w
+ExitClearTable:
+    dc.l    0x70000002              | 0xB000-0xB3FF (ウインドウ面)
+    dc.w    0x400/4-1
+    dc.l    0x7a800002              | 0xBA80-0xBFFF
+    dc.w    0x580/4-1
+    dc.l    0x4e000003              | 0xCE00-0xDFFF
+    dc.w    0x1200/4-1
+    dc.l    0x6e000003              | 0xEE00-0xFFFF (目印も消える)
+    dc.w    0x1200/4-1
+    dc.l    0
 
 | ------------------------------------------------------------------
 | ロゴを 1 列ずつ出す (元: 0x016b3a-0x016b7e, 爆発の横移動に合わせて 2 フレームに 1 列)

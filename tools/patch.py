@@ -72,6 +72,8 @@ def hooks(s):
     h = []
     # タイトル初期化: プレーン消去の後に新タイル・BG マップを転送
     h.append((0x0167c0, '4eb900020342', jsr(s['TitleInit'])))
+    # 画面初期化の共通処理: タイトルの後ならタイトル用に使った領域を 0 に戻す
+    h.append((0x001c82, '0279ffbf00ffe002', jsr(s['TitleExitClear']) + b'\x4e\x71'))
     # ロゴのパレット (PAL1) を新ロゴに
     h.append((0x017096, '000000000008000600080' '00c000e020e06640e000444066608880aaa040e0eee',
               open(os.path.join(BUILD, 'logo_pal.bin'), 'rb').read()))
