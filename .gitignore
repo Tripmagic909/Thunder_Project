@@ -1,0 +1,5 @@
+# 元 ROM・生成物・作業用
+rom/
+build/
+work/
+__pycache__/
