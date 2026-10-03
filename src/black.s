@@ -19,7 +19,7 @@
     .equ BL_POOL_N,       31        | 敵弾プールの数 - 1 (32 発. 使用中ビットが 32 ビットのため上限)
 
 | BLACK 用 RAM (全ステージで未使用を確認した領域)
-    .equ BL_POOL,       0xffa400    | 敵弾プール 32 x 0x40 (元: 0xff78ca, 最大 23 発分)
+    .equ BL_POOL,       0xffb400    | 敵弾プール 32 x 0x40 (元: 0xff78ca, 最大 23 発分). 0xffa326-0xffae65 はボス戦で使われる
     .equ BL_BSAT,       0xff3300    | 敵弾のスプライト表 32 枠
     .equ BL_OSAT,       0xff3400    | VDP へ送るスプライト表 (詰め直し後) 80 枠
     .equ BL_OLDK,       0xff3700    | 元の敵弾スプライト枠の先頭番号 (通常時)

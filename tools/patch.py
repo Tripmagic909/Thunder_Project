@@ -116,7 +116,7 @@ def hooks(s):
     h.append((0x0105b8, '38280014d968001a3a280016db68001c53680012', jsr(s['BlackEnemyMove']) + nop * 7))
     # 敵弾プールを全ステージ未使用の RAM へ移す (BLACK で 32 発まで広げるため. 通常時も同じ場所を使う)
     for a in (0x010128, 0x0117b0, 0x0118a0, 0x011aac, 0x0122d6, 0x012e18):
-        h.append((a, '00ff78ca', struct.pack('>I', 0xffa400)))
+        h.append((a, '00ff78ca', struct.pack('>I', 0xffb400)))
     # BLACK: ステージ / ボス戦開始時に敵弾プールを 32 発にし, スプライト枠を専用の表へ
     h.append((0x00457a, '42b900ff7000', jsr(s['BlackStageInit'])))
     h.append((0x011e86, '33d900ff601a', jsr(s['BlackBossInit'])))
