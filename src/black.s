@@ -30,6 +30,17 @@
     .equ SCENE,         0xff0000    | 場面番号 (3 = ゲーム中)
     .equ WAIT_VBLANK,   0x000326
     .equ BL_ORIG_WORDS, 0xff370a    | このフレームの出現リストの元の長さ (ワード数)
+    .equ BL_RING_T,     0xff370c    | ボスのリング弾: 次に撃てるフレーム
+    .equ BL_RING_PH,    0xff370e    | ボスのリング弾: 角度のずらし (0 / 1)
+    .equ BL_BIG_T,      0xff3710    | 大型ボス (1 面の陸上戦艦など): 次にリングを撃てるフレーム
+    .equ BL_BIG_I,      0xff3712    | 大型ボス: 次に弾を出すスプライトの番号
+    .equ BL_SHOOTER,    0xff3690    | 大型ボスの弾を出す仮の敵 (0x40 バイト. 位置だけ使う)
+    .equ BIG_BOSS,      0xff002c    | 大型ボスの間は 0 以外 (敵・敵弾の処理が止まる)
+    .equ HIT_LIST,      0xff818a    | 自機に当たる物の当たり判定の表 (種類.w, y.w, x.w) x n, 0xffff で終わり
+    .equ HIT_LIST_MAX,  80
+    .equ HIT_LIST_PTR,  0xff7ef4    | 表の書き込み位置 (敵の処理の後, 敵弾の処理が続きを書く)
+    .equ BIG_SAT0,      0xff981c    | 大型ボスの本体を描くスプライト表の範囲 (先頭, 終わりの次)
+    .equ BIG_SAT1,      0xff9820
     .equ BL_QUEUE,      0xff3720    | 追加編隊の待ち行列: (敵コード.w, 残りフレーム.w) x 16
     .equ BL_QUEUE_N,    16
     .equ SPAWN_LIST,    0xff000a    | このフレームに出す敵コードのリスト (0 で終わり)
@@ -42,6 +53,13 @@
     .equ TILE_A1,       0x0600
     .equ TILE_B0,       0x058c      | コピー先 B: VRAM 0xB180-0xB3FF (ウインドウ面の表示しない行, 20 枚)
     .equ TILE_B1,       0x05a0
+
+| ボス・中ボスのリング弾 (BLACK)
+    .equ RING_N,        12          | 1 回のリングの弾数 (30 度おき)
+    .equ RING_FREE,     14          | プールにこれだけ空きがあるときだけ撃つ
+    .equ RING_INTERVAL, 72          | 次のリングまでのフレーム数
+    .equ RING_SPEED,    24          | 弾の速さ (1/16 ドット / フレーム)
+    .equ BIG_INTERVAL,  40          | 大型ボス: 次のリングまでのフレーム数
 
 | 追加編隊の調整値
     .equ BL_DUP_DELAY,  40          | 元の敵から何フレーム遅れて出すか
@@ -69,15 +87,182 @@ OrigBulletSpawn:
     lea     SpreadTable,a3
 2:  move.w  (a3)+,d5                | 必要な空き数 (0 = 表の終わり)
     beq.s   9f
-    bsr.s   FreeBulletSlots
+    bsr.w   FreeBulletSlots
     cmp.w   d5,d0
     blt.s   9f
-    bsr.s   RotSpawn                | +角度
-    bsr.s   RotSpawn                | -角度
+    bsr.w   RotSpawn                | +角度
+    bsr.w   RotSpawn                | -角度
     bra.s   2b
-9:  move.l  (sp)+,a2
+9:  tst.w   BOSS_MODE
+    beq.s   8f
+    bsr.w   BossRing                | ボス・中ボス戦: リング弾
+8:  move.l  (sp)+,a2
     movem.l (sp)+,d0-d1/d3-d7/a3
     rts
+
+| ボス・中ボス戦: RING_INTERVAL フレームおきに, 狙った方向を基準に 30 度おき RING_N 発のリング弾.
+| リングごとに 15 度ずらす. d6/d7 = 元の速度, a0 = 撃った敵. d0/d1/d3-d7/a3 を使う
+BossRing:
+    move.w  FRAME_CNT,d0
+    sub.w   BL_RING_T,d0
+    bpl.s   1f
+    cmpi.w  #-RING_INTERVAL,d0      | 待ち時間中 (それより前なら古い値なので撃つ)
+    bge.s   9f
+1:  bsr.w   FreeBulletSlots
+    cmpi.w  #RING_FREE,d0
+    blt.s   9f
+    move.w  FRAME_CNT,d0
+    addi.w  #RING_INTERVAL,d0
+    move.w  d0,BL_RING_T
+    move.w  d6,d0                   | 速さ ~ max(|vx|,|vy|) + min/2
+    bpl.s   2f
+    neg.w   d0
+2:  move.w  d7,d1
+    bpl.s   3f
+    neg.w   d1
+3:  cmp.w   d1,d0
+    bcc.s   4f
+    exg     d0,d1
+4:  lsr.w   #1,d1
+    add.w   d1,d0
+    beq.s   9f
+    muls.w  #RING_SPEED,d6          | 速さを RING_SPEED にそろえる
+    divs.w  d0,d6
+    muls.w  #RING_SPEED,d7
+    divs.w  d0,d7
+| (d6, d7) を基準に 30 度おき RING_N 発. リングごとに 15 度ずらす
+RingFire:
+    lea     RingTable,a3
+    bchg    #0,BL_RING_PH+1
+    beq.s   5f
+    addq.l  #4,a3                   | 15 度ずらす
+5:  moveq   #RING_N-1,d5
+6:  bsr.w   RotSpawn
+    addq.l  #4,a3                   | 1 つ飛ばし (30 度おき)
+    dbra    d5,6b
+9:  rts
+
+| ------------------------------------------------------------------
+| 大型ボス (1 面の陸上戦艦など. ボス戦の扱いにならない) の処理の途中 (元: 0x02f7d6 bsr $3015c / bsr $30682).
+| BLACK: BIG_INTERVAL フレームおきに, 本体のスプライトから順にリング弾を撃つ.
+BlackBigBoss:
+    jsr     0x03015c
+    jsr     0x030682
+    cmpi.w  #RANK_BLACK,RANK
+    bne.w   9f
+    movem.l d0-d7/a0-a3,-(sp)
+    move.w  FRAME_CNT,d0
+    sub.w   BL_BIG_T,d0
+    bpl.s   1f
+    cmpi.w  #-BIG_INTERVAL,d0
+    bge.w   8f
+1:  bsr.w   FreeBulletSlots
+    cmpi.w  #RING_FREE,d0
+    blt.w   8f
+    movea.l BIG_SAT0,a1             | 本体のスプライト表
+    move.l  BIG_SAT1,d1
+    sub.l   a1,d1
+    lsr.w   #3,d1                   | 枠数
+    beq.w   8f
+    cmpi.w  #32,d1
+    bhi.w   8f
+    move.w  d1,d7
+    subq.w  #1,d7                   | 調べる回数 - 1
+    move.w  BL_BIG_I,d2
+2:  addq.w  #1,d2
+    cmp.w   d1,d2
+    bcs.s   3f
+    moveq   #0,d2
+3:  move.w  d2,d3
+    lsl.w   #3,d3
+    move.w  (a1,d3.w),d4            | y (+128)
+    move.w  6(a1,d3.w),d5           | x (+128)
+    andi.w  #0x1ff,d5
+    cmpi.w  #128+16,d4              | 画面内 (端は除く) のスプライトだけ
+    bcs.s   4f
+    cmpi.w  #128+200,d4
+    bcc.s   4f
+    cmpi.w  #128+16,d5
+    bcs.s   4f
+    cmpi.w  #128+304,d5
+    bcs.s   5f
+4:  dbra    d7,2b
+    bra.w   8f
+5:  move.w  d2,BL_BIG_I
+    move.w  2(a1,d3.w),d0           | 大きさ: 中心へ
+    move.w  d0,d1
+    andi.w  #0x0300,d1              | 縦 (タイル数 - 1)
+    lsr.w   #8-2,d1
+    addq.w  #4,d1
+    add.w   d1,d4                   | y + 縦 x 4
+    andi.w  #0x0c00,d0              | 横
+    lsr.w   #8,d0
+    addq.w  #4,d0
+    add.w   d0,d5                   | x + 横 x 4
+    lea     BL_SHOOTER,a0
+    lsl.w   #4,d4
+    move.w  d4,0x1a(a0)
+    lsl.w   #4,d5
+    move.w  d5,0x1c(a0)
+    clr.w   0x2c(a0)
+    clr.l   0x32(a0)
+    clr.l   0x3a(a0)
+    move.w  FRAME_CNT,d0
+    addi.w  #BIG_INTERVAL,d0
+    move.w  d0,BL_BIG_T
+    moveq   #0,d2                   | 弾の種類
+    moveq   #-RING_SPEED,d6         | 基準: 左向き
+    moveq   #0,d7
+    bsr.w   RingFire
+8:  movem.l (sp)+,d0-d7/a0-a3
+9:  rts
+
+| 敵・敵弾の処理 (元: 0x0011ac jsr $1000a). 大型ボスの間 ($ff002c != 0) は元の処理が敵弾も止めるので,
+| BLACK では敵弾 (移動・表示・当たり判定の表への登録) だけ動かす (大型ボスのリング弾のため).
+| 当たり判定の表 ($ff818a, 6 バイト x n, 0xffff で終わり) は大型ボスが毎フレーム作り直すので, その後ろに足す.
+BlackEnemySys:
+    jsr     0x01000a
+    cmpi.w  #RANK_BLACK,RANK
+    bne.s   9f
+    tst.w   BIG_BOSS
+    beq.s   9f
+    lea     HIT_LIST,a1
+    move.w  #HIT_LIST_MAX-1,d0
+1:  cmpi.w  #0xffff,(a1)
+    beq.s   2f
+    addq.l  #6,a1
+    dbra    d0,1b
+    bra.s   9f                      | 終わりが見つからない: 何もしない
+2:  move.l  a1,HIT_LIST_PTR
+    jsr     0x01189e
+9:  rts
+
+| 15 度おきの (cos, sin) x 256
+RingTable:
+    dc.w    256, 0
+    dc.w    247, 66
+    dc.w    222, 128
+    dc.w    181, 181
+    dc.w    128, 222
+    dc.w    66, 247
+    dc.w    0, 256
+    dc.w    -66, 247
+    dc.w    -128, 222
+    dc.w    -181, 181
+    dc.w    -222, 128
+    dc.w    -247, 66
+    dc.w    -256, 0
+    dc.w    -247, -66
+    dc.w    -222, -128
+    dc.w    -181, -181
+    dc.w    -128, -222
+    dc.w    -66, -247
+    dc.w    0, -256
+    dc.w    66, -247
+    dc.w    128, -222
+    dc.w    181, -181
+    dc.w    222, -128
+    dc.w    247, -66
 
 | 追加弾: (必要な空き数, cos, sin, cos, -sin) x 角度
 SpreadTable:
@@ -101,7 +286,7 @@ RotSpawn:
     muls.w  d0,d1
     add.l   d1,d4
     asr.l   #8,d4                   | vy' = vx*s + vy*c
-    bra.s   OrigBulletSpawn
+    bra.w   OrigBulletSpawn
 
 | 敵弾プールの空き数 -> d0 (d1 使用)
 FreeBulletSlots:
@@ -447,7 +632,7 @@ BlackSpawnInject:
     rts
 
 | 敵の絵の更新 (元: 0x010540 jsr $1e16). 追加分の敵は色違いのタイル (パレット 3) で描く.
-| 色違いタイル: パレット 2 で描く部分をパレット 3 で描き, 黄色になる色 8, 12 を深い緑 (色 7) にしたコピー.
+| 色違いタイル: パレット 2 で描く部分をパレット 3 で描き, 緑・黄色になる色 7, 8, 12 を紺 (色 4) にしたコピー.
 BlackEnemyAnim:
     jsr     0x001e16
     btst    #0,OBJ_DUP+1(a0)
@@ -564,9 +749,9 @@ CopyGreenTile:
     movem.l (sp)+,d0-d2/d7/a1
     rts
 
-| 色の置き換え表 (パレット 2 の色番号 -> パレット 3 で描く色番号). 8, 12 (黄色になる) -> 7 (深い緑)
+| 色の置き換え表 (パレット 2 の色番号 -> パレット 3 で描く色番号). 7, 8, 12 (緑・黄色になる) -> 4 (紺 0x620)
 GreenMap:
-    dc.b    0, 1, 2, 3, 4, 5, 6, 7, 7, 9, 10, 11, 7, 13, 14, 15
+    dc.b    0, 1, 2, 3, 4, 5, 6, 4, 4, 9, 10, 11, 4, 13, 14, 15
 
 | d0 = タイル番号 -> d0 = VRAM 読み込みコマンド (アドレス = タイル * 32)
 VramCmd:

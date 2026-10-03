@@ -127,6 +127,9 @@ def hooks(s):
     # 追加編隊: 出現リストの最後に追加分を足す / 追加分の敵の色を替える
     h.append((0x023090, '33c000ff932643f900ff000a', jmp(s['BlackSpawnInject']) + nop * 3))
     h.append((0x010540, '4eb900001e16', jsr(s['BlackEnemyAnim'])))
+    # 大型ボス (1 面の陸上戦艦など): BLACK でリング弾
+    h.append((0x02f7d6, '6100098461000ea6', jsr(s['BlackBigBoss']) + nop))
+    h.append((0x0011ac, '4eb90001000a', jsr(s['BlackEnemySys'])))
     # タイトルで C+START: BLACK LABEL (試作)
     h.append((0x016e36, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
     # 隠しメニュー (左+C) の START でも C+START で BLACK LABEL (NO DEATH と組み合わせて確認用)
