@@ -33,7 +33,7 @@
     .equ BL_QUEUE,      0xff3720    | 追加編隊の待ち行列: (敵コード.w, 残りフレーム.w) x 16
     .equ BL_QUEUE_N,    16
     .equ SPAWN_LIST,    0xff000a    | このフレームに出す敵コードのリスト (0 で終わり)
-    .equ OBJ_DUP,       0x48        | 敵オブジェクト内の未使用欄: 追加編隊の印
+    .equ OBJ_DUP,       0x48        | 敵オブジェクト内の未使用欄: bit 0 = 追加編隊, bit 1 = 飛行ザコ
     .equ BL_TCACHE,     0xff3780    | 色違いタイルの一覧: (元のタイル.w, 枚数.w, コピー先.w) x 24
     .equ BL_TCACHE_N,   24
     .equ BL_TFREE_A,    0xff3770    | コピー先 A の次の空き (タイル番号)
@@ -185,7 +185,8 @@ BlackPlayerBox:
 
 | ------------------------------------------------------------------
 | ザコ敵の移動 (元: 0x0105b8-0x0105cb 位置 += 速度, 継続フレーム -1)
-| BLACK: 4 フレームに 1 回もう 1 歩進める (軌道はそのままで約 1.25 倍速)
+| BLACK: 4 フレームに 1 回もう 1 歩進める (軌道はそのままで約 1.25 倍速).
+| 飛行ザコだけ (地上物は BG と同じ速さで動くので速くするとずれる)
 BlackEnemyMove:
     move.w  0x14(a0),d4
     add.w   d4,0x1a(a0)
@@ -194,6 +195,8 @@ BlackEnemyMove:
     subq.w  #1,0x12(a0)
     cmpi.w  #RANK_BLACK,RANK
     bne.s   9f
+    btst    #1,OBJ_DUP+1(a0)        | 飛行ザコの印
+    beq.s   9f
     btst    #0,FRAME_CNT+1
     bne.s   9f
     btst    #1,FRAME_CNT+1
@@ -372,11 +375,12 @@ BlackDupSpawned:
     lsr.w   #1,d0                   | 読んだワード数
     cmp.w   BL_ORIG_WORDS,d0
     bls.s   1f
-    move.w  #1,OBJ_DUP(a2)          | 追加分として出た敵
+    move.w  #3,OBJ_DUP(a2)          | 追加分として出た敵 (bit 0) で飛行ザコ (bit 1)
     bra.s   9f
 1:  move.w  -2(a0),d0               | 敵コード (上位: 出現位置, 下位: 敵の種類)
     bsr.s   IsFlyingZako
     beq.s   9f
+    move.w  #2,OBJ_DUP(a2)          | 飛行ザコ (bit 1)
     lea     BL_QUEUE,a1             | 空いている待ち行列に入れる
     moveq   #BL_QUEUE_N-1,d1
 2:  tst.w   (a1)
@@ -446,7 +450,7 @@ BlackSpawnInject:
 | 色違いタイル: パレット 2 で描く部分をパレット 3 で描き, 黄色になる色 8, 12 を深い緑 (色 7) にしたコピー.
 BlackEnemyAnim:
     jsr     0x001e16
-    tst.w   OBJ_DUP(a0)
+    btst    #0,OBJ_DUP+1(a0)
     beq.s   9f
     movem.l d0-d7/a1-a2,-(sp)
 1:  move.w  4(a2),d0
