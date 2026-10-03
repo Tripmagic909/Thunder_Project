@@ -30,7 +30,7 @@
     .equ WAIT_VBLANK,   0x000326
     .equ BL_ORIG_WORDS, 0xff370a    | このフレームの出現リストの元の長さ (ワード数)
     .equ BL_RING_T,     0xff370c    | ボスのリング弾: 次に撃てるフレーム
-    .equ BL_RING_PH,    0xff370e    | ボスのリング弾: 角度のずらし (0 / 1)
+    .equ BL_RING_PH,    0xff370e    | リング弾: 角度 (0-35, 10 度単位)
     .equ BL_BIG_T,      0xff3710    | 大型ボス (1 面の陸上戦艦など): 次にリングを撃てるフレーム
     .equ BL_BIG_I,      0xff3712    | 大型ボス: 次に弾を出すスプライトの番号
     .equ BL_DBG_BLACK,  0xff3714    | 隠しメニューの BLACK (0 = OFF, 1 = ON). タイトル初期化で OFF
@@ -40,8 +40,6 @@
     .equ HIT_LIST_MAX,  80
     .equ HIT_LIST_PTR,  0xff7ef4    | 表の書き込み位置 (敵の処理の後, 敵弾の処理が続きを書く)
     .equ PLAYER,        0xff4002    | 自機 ($0e / $10 が位置)
-    .equ BL_SPIRAL,     0xff3716    | 狙わない弾の向き (0-23, 15 度単位)
-    .equ BL_CALLER,     0xff371c    | 敵弾生成の呼び出し元
     .equ BL_BOSS_OBJ,   0xff3718    | ボス戦でリング弾を撃つ敵 (最後に弾を撃った敵. 0 = なし)
     .equ BL_QUEUE,      0xff3720    | 追加編隊の待ち行列: (敵コード.w, 残りフレーム.w) x 16
     .equ BL_QUEUE_N,    16
@@ -58,6 +56,7 @@
 
 | ボス・中ボスのリング弾 (BLACK)
     .equ RING_N,        12          | 1 回のリングの弾数 (30 度おき)
+    .equ RING_STEPS,    36          | 角度の刻み (10 度)
     .equ RING_FREE,     14          | プールにこれだけ空きがあるときだけ撃つ
     .equ RING_INTERVAL, 48          | 次のリングまでのフレーム数
     .equ RING_SPEED,    24          | 弾の速さ (1/16 ドット / フレーム)
@@ -69,8 +68,8 @@
 | ------------------------------------------------------------------
 | 敵弾生成 (元: 0x0117a6). d2 = 弾の種類, d3/d4 = 速度 (1/16 ドット), a0 = 撃った敵.
 | 元の処理は a2 (生成した弾) 以外のレジスタを保存する.
-| BLACK: 自機狙いの弾は増やさず狙わない弾を 2-4 発, 狙っていない弾は角度をずらした弾を 4 発足す (5-way).
-| 特殊な弾 (種類 1 以上) は増やさない. プールの空きが少ないときは減らす.
+| BLACK: 角度をずらした弾を最大 4 発追加 (5-way). 特殊な弾 (種類 1 以上) は増やさない.
+| プールの空きが少ないときは減らす.
 BlackBulletSpawn:
     cmpi.w  #RANK_BLACK,RANK
     beq.s   1f
@@ -78,8 +77,7 @@ OrigBulletSpawn:
     movem.l d0-d7/a0-a1/a3-a6,-(sp)
     lea     0x00f192,a1
     jmp     BUL_SPAWN_BODY
-1:  move.l  (sp),BL_CALLER          | 呼び出し元 (弾の撃ち方の判定に使う)
-    movem.l d0-d1/d3-d7/a1/a3,-(sp)
+1:  movem.l d0-d1/d3-d7/a1/a3,-(sp)
     tst.w   BOSS_MODE
     beq.s   0f
     bsr.w   BossPoolFix
@@ -89,11 +87,7 @@ OrigBulletSpawn:
     bne.s   9f                      | 特殊な弾 (ミサイル・機雷など) は増やさない
     move.w  d3,d6                   | 元の速度
     move.w  d4,d7
-    bsr.w   IsAimed
-    beq.s   0f
-    bsr.w   SpiralShots             | 自機狙い: 狙った弾は増やさず, 狙わない弾を足す
-    bra.s   9f
-0:  lea     SpreadTable,a3          | 狙っていない弾: 角度をずらした弾を足す
+    lea     SpreadTable,a3          | 角度をずらした弾を足す
 2:  move.w  (a3)+,d5                | 必要な空き数 (0 = 表の終わり)
     beq.s   9f
     bsr.w   FreeBulletSlots
@@ -107,110 +101,6 @@ OrigBulletSpawn:
     move.l  a0,BL_BOSS_OBJ          | ボス戦: リング弾を撃つ敵 (最後に撃った敵)
 8:  move.l  (sp)+,a2
     movem.l (sp)+,d0-d1/d3-d7/a1/a3
-    rts
-
-| 自機狙いか: 弾の速度 (d6, d7) と, 撃った敵 (a0) から自機への向きの差が約 26 度以内なら d0 = 1 (Z=0).
-| d0/d1/d3-d5 を使う
-IsAimed:
-    move.l  BL_CALLER,d0            | 自機狙いの扇形弾などの撃ち方は, 扇の外側の弾も自機狙いとする
-    lea     AimedCallers,a3
-0:  move.l  (a3)+,d1
-    beq.s   2f
-    cmp.l   d1,d0
-    bne.s   0b
-    moveq   #1,d0
-    rts
-2:  move.w  0x32(a0),d0             | 撃った位置 (弾の生成と同じ: 位置 + 大きさ / 2)
-    lsr.w   #1,d0
-    add.w   0x1a(a0),d0
-    lsr.w   #4,d0
-    move.w  0x34(a0),d1
-    lsr.w   #1,d1
-    add.w   0x1c(a0),d1
-    lsr.w   #4,d1
-    move.w  PLAYER+0x0e,d3          | 自機の位置 (0x010958 と同じ計算)
-    addi.w  #0x80,d3
-    lsr.w   #4,d3
-    sub.w   d0,d3
-    move.w  PLAYER+0x10,d4
-    addi.w  #0x140,d4
-    lsr.w   #4,d4
-    sub.w   d1,d4
-    move.w  d6,d0                   | 内積
-    muls.w  d3,d0
-    move.w  d7,d1
-    muls.w  d4,d1
-    add.l   d1,d0
-    ble.s   8f
-    move.w  d6,d1                   | 外積
-    muls.w  d4,d1
-    move.w  d7,d5
-    muls.w  d3,d5
-    sub.l   d5,d1
-    bpl.s   1f
-    neg.l   d1
-1:  add.l   d1,d1                   | |外積| x 2 < 内積 (tan 26.5 度)
-    cmp.l   d0,d1
-    bge.s   8f
-    moveq   #1,d0
-    rts
-8:  moveq   #0,d0
-    rts
-
-| 自機を狙って撃つ処理 (0x0117a6 の呼び出し元の戻り先)
-AimedCallers:
-    dc.l    0x010ece                | ザコ: 自機狙い 1 発
-    dc.l    0x010f24                | ザコ: 自機狙い 3-way
-    dc.l    0x010f7c                | ザコ: 自機狙い 5-way
-    dc.l    0x011228                | ボス: 自機狙い 3-way
-    dc.l    0
-
-| 自機狙いの弾の代わりの, 狙わない弾: 同じ速さで, 回転する向き (BL_SPIRAL) に
-| 空きが 6 以上なら 4 発 (90 度おき), 4 以上なら 2 発 (180 度おき). d6/d7 = 元の速度
-SpiralShots:
-    bsr.w   SpeedOf                 | -> d0 = 速さ
-    beq.s   9f
-    move.w  d0,d6                   | 基準 (速さ, 0)
-    moveq   #0,d7
-    bsr.w   FreeBulletSlots
-    moveq   #3,d5
-    movea.w #6*4-4,a1               | 90 度おき
-    cmpi.w  #6,d0
-    bge.s   1f
-    moveq   #1,d5
-    movea.w #12*4-4,a1              | 180 度おき
-    cmpi.w  #4,d0
-    blt.s   9f
-1:  move.w  BL_SPIRAL,d1
-    addq.w  #5,d1                   | 撃つたびに 75 度回す
-    cmpi.w  #24,d1
-    bcs.s   2f
-    subi.w  #24,d1
-2:  move.w  d1,BL_SPIRAL
-    lea     RingTable,a3
-    lsl.w   #2,d1
-    adda.w  d1,a3
-3:  bsr.w   RotSpawn
-    adda.w  a1,a3
-    cmpa.l  #RingTable+24*4,a3
-    bcs.s   4f
-    suba.w  #24*4,a3
-4:  dbra    d5,3b
-9:  rts
-
-| (d6, d7) の速さ ~ max(|x|,|y|) + min/2 -> d0 (d1 を使う)
-SpeedOf:
-    move.w  d6,d0
-    bpl.s   1f
-    neg.w   d0
-1:  move.w  d7,d1
-    bpl.s   2f
-    neg.w   d1
-2:  cmp.w   d1,d0
-    bcc.s   3f
-    exg     d0,d1
-3:  lsr.w   #1,d1
-    add.w   d1,d0
     rts
 
 | ボス戦: ボスの攻撃が敵弾の数と表の位置 ($ff6014 / $ff6016) を書き換えたら, BLACK の設定 (32 発, 専用の表) に戻す.
@@ -237,7 +127,7 @@ BossPoolFix:
 9:  rts
 
 | ボス・中ボス戦 (毎フレーム, BlackEnemySys から): RING_INTERVAL フレームおきに, 最後に弾を撃った敵
-| (BL_BOSS_OBJ) が画面内にいれば, 30 度おき RING_N 発のリング弾 (自機は狙わない). リングごとに 15 度ずらす
+| (BL_BOSS_OBJ) が画面内にいれば, 30 度おき RING_N 発のリング弾 (自機は狙わない). 撃つたびに時計回りに 10 度ずらす
 BossRing:
     movem.l d0-d7/a0-a3,-(sp)
     move.w  FRAME_CNT,d0
@@ -269,22 +159,31 @@ BossRing:
     addi.w  #RING_INTERVAL,d0
     move.w  d0,BL_RING_T
     moveq   #0,d2                   | 弾の種類
-    moveq   #-RING_SPEED,d6         | 基準: 左向き
+    moveq   #-RING_SPEED,d6         | 基準: 上向き
     moveq   #0,d7
     bsr.s   RingFire
 8:  movem.l (sp)+,d0-d7/a0-a3
     rts
 
-| (d6, d7) を基準に 30 度おき RING_N 発. リングごとに 15 度ずらす
+| (d6, d7) を基準に 30 度おき RING_N 発. 撃つたびに時計回りに 10 度ずらす (BL_RING_PH: 0-35)
+| (速度は ($1a, $1c) = (縦, 横) の順なので, 表の角度が増える向きが画面では反時計回り)
 RingFire:
+    move.w  BL_RING_PH,d0
+    subq.w  #1,d0                   | 時計回りに 10 度
+    cmpi.w  #RING_STEPS,d0          | 0-35 の外 (-1 など) なら 35
+    bcs.s   5f
+    moveq   #RING_STEPS-1,d0
+5:  move.w  d0,BL_RING_PH
     lea     RingTable,a3
-    bchg    #0,BL_RING_PH+1
-    beq.s   5f
-    addq.l  #4,a3                   | 15 度ずらす
-5:  moveq   #RING_N-1,d5
-6:  bsr.w   RotSpawn
-    addq.l  #4,a3                   | 1 つ飛ばし (30 度おき)
-    dbra    d5,6b
+    lsl.w   #2,d0
+    adda.w  d0,a3
+    moveq   #RING_N-1,d5
+6:  bsr.w   RotSpawn                | (a3 は 4 バイト進む)
+    addq.l  #(RING_STEPS/RING_N-1)*4,a3 | 30 度おき
+    cmpa.l  #RingTable+RING_STEPS*4,a3
+    bcs.s   7f
+    suba.w  #RING_STEPS*4,a3
+7:  dbra    d5,6b
 9:  rts
 
 | ------------------------------------------------------------------
@@ -356,7 +255,7 @@ BlackBigBoss:
     addi.w  #BIG_INTERVAL,d0
     move.w  d0,BL_BIG_T
     moveq   #0,d2                   | 弾の種類
-    moveq   #-RING_SPEED,d6         | 基準: 左向き
+    moveq   #-RING_SPEED,d6         | 基準: 上向き
     moveq   #0,d7
     bsr.w   RingFire
 8:  movem.l (sp)+,d0-d7/a0-a3
@@ -390,32 +289,44 @@ BlackEnemySys:
     jsr     0x01189e
 9:  rts
 
-| 15 度おきの (cos, sin) x 256
+| 10 度おきの (cos, sin) x 256
 RingTable:
     dc.w    256, 0
-    dc.w    247, 66
+    dc.w    252, 44
+    dc.w    241, 88
     dc.w    222, 128
-    dc.w    181, 181
+    dc.w    196, 165
+    dc.w    165, 196
     dc.w    128, 222
-    dc.w    66, 247
+    dc.w    88, 241
+    dc.w    44, 252
     dc.w    0, 256
-    dc.w    -66, 247
+    dc.w    -44, 252
+    dc.w    -88, 241
     dc.w    -128, 222
-    dc.w    -181, 181
+    dc.w    -165, 196
+    dc.w    -196, 165
     dc.w    -222, 128
-    dc.w    -247, 66
+    dc.w    -241, 88
+    dc.w    -252, 44
     dc.w    -256, 0
-    dc.w    -247, -66
+    dc.w    -252, -44
+    dc.w    -241, -88
     dc.w    -222, -128
-    dc.w    -181, -181
+    dc.w    -196, -165
+    dc.w    -165, -196
     dc.w    -128, -222
-    dc.w    -66, -247
+    dc.w    -88, -241
+    dc.w    -44, -252
     dc.w    0, -256
-    dc.w    66, -247
+    dc.w    44, -252
+    dc.w    88, -241
     dc.w    128, -222
-    dc.w    181, -181
+    dc.w    165, -196
+    dc.w    196, -165
     dc.w    222, -128
-    dc.w    247, -66
+    dc.w    241, -88
+    dc.w    252, -44
 
 | 追加弾: (必要な空き数, cos, sin, cos, -sin) x 角度
 SpreadTable:
