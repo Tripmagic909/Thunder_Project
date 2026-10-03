@@ -129,6 +129,8 @@ def hooks(s):
     h.append((0x010540, '4eb900001e16', jsr(s['BlackEnemyAnim'])))
     # タイトルで C+START: BLACK LABEL (試作)
     h.append((0x016e36, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
+    # 隠しメニュー (左+C) の START でも C+START で BLACK LABEL (NO DEATH と組み合わせて確認用)
+    h.append((0x016efc, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
     return h
 
 

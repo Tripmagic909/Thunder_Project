@@ -23,7 +23,7 @@ P-47II MD（The Freedom Star）のタイトル画面を、新ロゴと BG 付き
 | ファイル | サイズ | CRC32 |
 | --- | --- | --- |
 | 元 ROM `P-47_II_MD_Japan_En.md` | 1,048,576 | `FE9B4C7F` |
-| パッチ後 ROM | 1,048,576 | `EB69EB40` |
+| パッチ後 ROM | 1,048,576 | `3EE378DE` |
 
 ## ビルド
 
@@ -110,6 +110,11 @@ tools/mame/run.sh build/P-47_II_MD_title.md work/snap "400:press:P1_Start;700:sh
 Rank 3（BLACK）として実装中。Easy / Normal / Hard の動作は元の ROM と同じ。
 試作版では、タイトルで **C を押しながら START** を選ぶと BLACK LABEL で始まる（タイトルに戻ると元の Rank に戻る）。
 クリア後の解放・SRAM 保存・タイトル表示は未実装。
+
+**確認用の無敵**: タイトルで **左+C** を押すと隠しメニューが出る（元の ROM にある機能）。
+
+1. カーソルを `NO DEATH` に合わせてボタンを押し、`ON` にする（自機が敵弾や敵に当たってもミスにならない）。
+2. `START` で始める。**C を押しながら START** なら BLACK LABEL で始まる（隠しメニューの START に `0x016EFC` でフックを追加）。
 
 | 項目 | BLACK の内容 | 実装（`src/black.s`） |
 | --- | --- | --- |
