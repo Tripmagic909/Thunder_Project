@@ -152,7 +152,8 @@ TitleDbg:
     lea     TitleDbgClear,a0
     jsr     DRAW_STRINGS
     lea     0x017012,a0
-    jmp     DRAW_STRINGS
+    jsr     DRAW_STRINGS
+    jmp     BlackDbgDraw
 
 | ------------------------------------------------------------------
 | スキップ時 (元: 0x016d38, 最終位置へ飛ぶ前): コピーライト描画 + BG を含む全パレットへフェード

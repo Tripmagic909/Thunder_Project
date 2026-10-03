@@ -132,8 +132,11 @@ def hooks(s):
     h.append((0x0011ac, '4eb90001000a', jsr(s['BlackEnemySys'])))
     # タイトルで C+START: BLACK LABEL (試作)
     h.append((0x016e36, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
-    # 隠しメニュー (左+C) の START でも C+START で BLACK LABEL (NO DEATH と組み合わせて確認用)
-    h.append((0x016efc, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
+    # 隠しメニュー (左+C) の START: BLACK が ON なら (または C+START で) BLACK LABEL
+    h.append((0x016efc, '33fc000400ff5202', jsr(s['BlackDbgStart']) + nop))
+    # 隠しメニューに BLACK ON/OFF (4 行目): カーソルの範囲 0-3, ボタンで切り替え
+    h.append((0x016f48, '7002', w(0x7003)))
+    h.append((0x016f40, '0a79000100ff4032', jsr(s['BlackDbgToggle']) + nop))
     return h
 
 

@@ -34,6 +34,7 @@
     .equ BL_RING_PH,    0xff370e    | ボスのリング弾: 角度のずらし (0 / 1)
     .equ BL_BIG_T,      0xff3710    | 大型ボス (1 面の陸上戦艦など): 次にリングを撃てるフレーム
     .equ BL_BIG_I,      0xff3712    | 大型ボス: 次に弾を出すスプライトの番号
+    .equ BL_DBG_BLACK,  0xff3714    | 隠しメニューの BLACK (0 = OFF, 1 = ON). タイトル初期化で OFF
     .equ BL_SHOOTER,    0xff3690    | 大型ボスの弾を出す仮の敵 (0x40 バイト. 位置だけ使う)
     .equ BIG_BOSS,      0xff002c    | 大型ボスの間は 0 以外 (敵・敵弾の処理が止まる)
     .equ HIT_LIST,      0xff818a    | 自機に当たる物の当たり判定の表 (種類.w, y.w, x.w) x n, 0xffff で終わり
@@ -410,8 +411,51 @@ BlackTitleStart:
 1:  move.w  (sp)+,d0
     rts
 
+| ------------------------------------------------------------------
+| 隠しメニュー (左+C): 4 行目に BLACK ON/OFF を追加
+| (元: START / STAGE / NO DEATH. カーソルの範囲 0x016f48 を 0-3 に)
+
+| 隠しメニューの START (元: 0x016efc move.w #4,$ff5202). BLACK が ON なら BLACK LABEL で始める
+BlackDbgStart:
+    tst.w   BL_DBG_BLACK
+    beq.w   BlackTitleStart         | OFF: 通常の START と同じ (C+START でも BLACK)
+    move.w  #4,0xff5202
+    cmpi.w  #RANK_BLACK,RANK
+    beq.s   1f
+    move.w  RANK,SAVED_RANK
+    move.w  #RANK_BLACK,RANK
+1:  rts
+
+| 隠しメニューでボタン (元: 0x016f40 eori.w #1,$ff4032). d0 = カーソル - 1
+BlackDbgToggle:
+    cmpi.w  #2,d0
+    beq.s   1f
+    eori.w  #1,0xff4032             | NO DEATH
+    rts
+1:  eori.w  #1,BL_DBG_BLACK         | BLACK
+    rts
+
+| 隠しメニューの 4 行目を描く (毎フレーム)
+BlackDbgDraw:
+    lea     DbgBlackLabel,a0
+    jsr     DRAW_STRINGS
+    lea     DbgBlackOff,a0
+    tst.w   BL_DBG_BLACK
+    beq.s   1f
+    lea     DbgBlackOn,a0
+1:  jmp     DRAW_STRINGS
+
+| 文字列 (描画位置, タイル..., 0xffff) ..., 0xffff. タイル 0x630a = A
+DbgBlackLabel:
+    dc.w    0x09e0, 0x630b, 0x6315, 0x630a, 0x630c, 0x6314, 0, 0, 0, 0, 0xffff, 0xffff
+DbgBlackOff:
+    dc.w    0x09f2, 0x6318, 0x630f, 0x630f, 0xffff, 0xffff
+DbgBlackOn:
+    dc.w    0x09f2, 0x6318, 0x6317, 0x0000, 0xffff, 0xffff
+
 | タイトル初期化時: BLACK で遊んだ後なら元の Rank に戻す
 BlackRestoreRank:
+    clr.w   BL_DBG_BLACK
     cmpi.w  #RANK_BLACK,RANK
     bne.s   1f
     move.w  SAVED_RANK,RANK
