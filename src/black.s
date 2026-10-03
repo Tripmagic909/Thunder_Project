@@ -41,6 +41,7 @@
     .equ HIT_LIST_PTR,  0xff7ef4    | 表の書き込み位置 (敵の処理の後, 敵弾の処理が続きを書く)
     .equ PLAYER,        0xff4002    | 自機 ($0e / $10 が位置)
     .equ BL_SPIRAL,     0xff3716    | 狙わない弾の向き (0-23, 15 度単位)
+    .equ BL_CALLER,     0xff371c    | 敵弾生成の呼び出し元
     .equ BL_BOSS_OBJ,   0xff3718    | ボス戦でリング弾を撃つ敵 (最後に弾を撃った敵. 0 = なし)
     .equ BL_QUEUE,      0xff3720    | 追加編隊の待ち行列: (敵コード.w, 残りフレーム.w) x 16
     .equ BL_QUEUE_N,    16
@@ -77,7 +78,8 @@ OrigBulletSpawn:
     movem.l d0-d7/a0-a1/a3-a6,-(sp)
     lea     0x00f192,a1
     jmp     BUL_SPAWN_BODY
-1:  movem.l d0-d1/d3-d7/a1/a3,-(sp)
+1:  move.l  (sp),BL_CALLER          | 呼び出し元 (弾の撃ち方の判定に使う)
+    movem.l d0-d1/d3-d7/a1/a3,-(sp)
     tst.w   BOSS_MODE
     beq.s   0f
     bsr.w   BossPoolFix
@@ -110,7 +112,15 @@ OrigBulletSpawn:
 | 自機狙いか: 弾の速度 (d6, d7) と, 撃った敵 (a0) から自機への向きの差が約 26 度以内なら d0 = 1 (Z=0).
 | d0/d1/d3-d5 を使う
 IsAimed:
-    move.w  0x32(a0),d0             | 撃った位置 (弾の生成と同じ: 位置 + 大きさ / 2)
+    move.l  BL_CALLER,d0            | 自機狙いの扇形弾などの撃ち方は, 扇の外側の弾も自機狙いとする
+    lea     AimedCallers,a3
+0:  move.l  (a3)+,d1
+    beq.s   2f
+    cmp.l   d1,d0
+    bne.s   0b
+    moveq   #1,d0
+    rts
+2:  move.w  0x32(a0),d0             | 撃った位置 (弾の生成と同じ: 位置 + 大きさ / 2)
     lsr.w   #1,d0
     add.w   0x1a(a0),d0
     lsr.w   #4,d0
@@ -146,6 +156,14 @@ IsAimed:
     rts
 8:  moveq   #0,d0
     rts
+
+| 自機を狙って撃つ処理 (0x0117a6 の呼び出し元の戻り先)
+AimedCallers:
+    dc.l    0x010ece                | ザコ: 自機狙い 1 発
+    dc.l    0x010f24                | ザコ: 自機狙い 3-way
+    dc.l    0x010f7c                | ザコ: 自機狙い 5-way
+    dc.l    0x011228                | ボス: 自機狙い 3-way
+    dc.l    0
 
 | 自機狙いの弾の代わりの, 狙わない弾: 同じ速さで, 回転する向き (BL_SPIRAL) に
 | 空きが 6 以上なら 4 発 (90 度おき), 4 以上なら 2 発 (180 度おき). d6/d7 = 元の速度
