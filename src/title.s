@@ -36,6 +36,7 @@
 | 新しいタイル (ロゴ・文字・BG) と BG のマップ (Plane B) を VRAM に書き込む.
 TitleInit:
     jsr     PLANE_CLEAR
+    jsr     BlackRestoreRank
     movem.l d0/d7/a0-a1,-(sp)
     lea     TitleLoadTable,a1
 1:  move.l  (a1)+,d0

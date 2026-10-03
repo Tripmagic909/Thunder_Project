@@ -23,7 +23,7 @@ P-47II MD（The Freedom Star）のタイトル画面を、新ロゴと BG 付き
 | ファイル | サイズ | CRC32 |
 | --- | --- | --- |
 | 元 ROM `P-47_II_MD_Japan_En.md` | 1,048,576 | `FE9B4C7F` |
-| パッチ後 ROM | 1,048,576 | `97C2B8A6` |
+| パッチ後 ROM | 1,048,576 | `22A41C3E` |
 
 ## ビルド
 
@@ -104,3 +104,19 @@ tools/mame/run.sh build/P-47_II_MD_title.md work/snap "400:press:P1_Start;700:sh
 - Mednafen でもストーリーデモ→タイトルの流れで表示を確認
 
 その他のツール: `tools/vdp.py`（VRAM ダンプから画面を再現）、`tools/m68dis.py`（逆アセンブル）、`tools/mame/trace_vram.lua`（VDP 書き込みの記録）、`tools/mame/bp.lua`（ブレークポイント）
+
+## BLACK LABEL（裏モード・試作中）
+
+Rank 3（BLACK）として実装中。Easy / Normal / Hard の動作は元の ROM と同じ。
+試作版では、タイトルで **C を押しながら START** を選ぶと BLACK LABEL で始まる（タイトルに戻ると元の Rank に戻る）。
+クリア後の解放・SRAM 保存・タイトル表示は未実装。
+
+| 項目 | BLACK の内容 | 実装（`src/black.s`） |
+| --- | --- | --- |
+| 敵弾 | 速さ約 0.7 倍、左右に約 12 度ずらした弾を 2 発追加（プールに空きが 4 以上あるとき） | 敵弾生成 `0x0117A6` |
+| ザコの耐久力 | 1.5 倍 | 出現時 `0x010390` |
+| ボスの耐久力 | Hard の 1.5 倍 | `0x011E46`（Rank 別の 3 値の表） |
+| 自機の当たり判定 | 横 15→5 ドット（縦 3 ドット、中心は同じ） | 当たり判定の表 `0x001FD0` |
+| ザコの速さ | 4 フレームに 1 回もう 1 歩（約 1.25 倍、軌道は同じ） | 移動 `0x0105B8` |
+
+調整用: `tools/bl_stats.py`（ダンプから敵弾数・プール満杯率・ライン毎のスプライト数を集計）、`tools/mame/wp.lua`（ウォッチポイント）。

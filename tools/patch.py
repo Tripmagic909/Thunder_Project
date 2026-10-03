@@ -3,7 +3,7 @@
   python3 tools/patch.py [元ROM]
 
 1. tools/build_title.py でアセットを生成
-2. src/title.s をアセンブルし ROM 空き領域 (0x085000-) に配置
+2. src/main.s (title.s, black.s) をアセンブルし ROM 空き領域 (0x085000-) に配置
 3. 元のコードに jsr/jmp などのフックを書き込む (書き換え前のバイト列を確認)
 4. build/P-47_II_MD_title.md (パッチ済み ROM) と patch/P-47_II_MD_title.ips を出力
 """
@@ -33,7 +33,7 @@ def assemble():
     elf = os.path.join(BUILD, 'title.elf')
     binf = os.path.join(BUILD, 'title.bin')
     run(['m68k-linux-gnu-as', '-m68000', '--register-prefix-optional',
-         '-I', BUILD, '-o', obj, os.path.join(ROOT, 'src', 'title.s')])
+         '-I', BUILD, '-I', os.path.join(ROOT, 'src'), '-o', obj, os.path.join(ROOT, 'src', 'main.s')])
     run(['m68k-linux-gnu-ld', '-Ttext=0x%x' % BASE, '-e', '0x%x' % BASE, '-o', elf, obj])
     run(['m68k-linux-gnu-objcopy', '-O', 'binary', '-j', '.text', elf, binf])
     syms = {}
@@ -100,6 +100,22 @@ def hooks(s):
     h.append((0x016f6c, '0000', w(0x0100)))
     h.append((0x016f74, '6329', w(cur)))
     h.append((0x016ede, '41fa01324eb900020232', jsr(s['TitleDbg']) + b'\x4e\x71' * 2))
+
+    # ---- BLACK LABEL (Rank 3) ----
+    nop = b'\x4e\x71'
+    # 敵弾生成: 速度を落とし, 角度をずらした弾を追加
+    h.append((0x0117a6, '48e7ffde43fa', jmp(s['BlackBulletSpawn'])))
+    h.append((0x0117ac, 'd9e6', nop))
+    # ザコ敵の耐久力
+    h.append((0x010390, '355b0024255b0026', jsr(s['BlackEnemyHp']) + nop))
+    # ボスの耐久力 (Rank 別の表)
+    h.append((0x011e46, '303900fffc06d0403171000000245c49', jsr(s['BlackBossHp']) + nop * 5))
+    # 当たり判定の表 (自機を小さく)
+    h.append((0x001fd0, '4dfaf490e74cdcc4', jsr(s['BlackHitbox']) + nop))
+    # ザコ敵の移動 (約 1.25 倍速)
+    h.append((0x0105b8, '38280014d968001a3a280016db68001c53680012', jsr(s['BlackEnemyMove']) + nop * 7))
+    # タイトルで C+START: BLACK LABEL (試作)
+    h.append((0x016e36, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
     return h
 
 
