@@ -15,7 +15,7 @@
     .equ HITBOX_TABLE,  0x001462    | 当たり判定の表 (種類 x 8 バイト: y0,y1,x0,x1)
 
 | 調整値
-    .equ BL_BULLET_SPEED, 179       | 敵弾の速さ (x/256. 179 = 約 0.7 倍)
+    .equ BL_BULLET_SPEED, 256       | 敵弾の速さ (x/256). 弾数増による処理落ちで遅くなるため 1.0 倍のまま
     .equ BL_POOL_N,       31        | 敵弾プールの数 - 1 (32 発. 使用中ビットが 32 ビットのため上限)
 
 | BLACK 用 RAM (全ステージで未使用を確認した領域)
@@ -34,6 +34,14 @@
     .equ BL_QUEUE_N,    16
     .equ SPAWN_LIST,    0xff000a    | このフレームに出す敵コードのリスト (0 で終わり)
     .equ OBJ_DUP,       0x48        | 敵オブジェクト内の未使用欄: 追加編隊の印
+    .equ BL_TCACHE,     0xff3780    | 色違いタイルの一覧: (元のタイル.w, 枚数.w, コピー先.w) x 24
+    .equ BL_TCACHE_N,   24
+    .equ BL_TFREE_A,    0xff3770    | コピー先 A の次の空き (タイル番号)
+    .equ BL_TFREE_B,    0xff3772    | コピー先 B の次の空き
+    .equ TILE_A0,       0x05d4      | コピー先 A: VRAM 0xBA80-0xBFFF (スプライト表の後ろ, 44 枚)
+    .equ TILE_A1,       0x0600
+    .equ TILE_B0,       0x058c      | コピー先 B: VRAM 0xB180-0xB3FF (ウインドウ面の表示しない行, 20 枚)
+    .equ TILE_B1,       0x05a0
 
 | 追加編隊の調整値
     .equ BL_DUP_DELAY,  40          | 元の敵から何フレーム遅れて出すか
@@ -234,7 +242,7 @@ BlackStageInit:
     movem.l d0/d7/a0,-(sp)
     movea.l 0xff4c0a,a0
     move.w  BUL_POOL_N,d7
-    bsr.s   MoveBulletSat
+    bsr.w   MoveBulletSat
     move.w  d0,BL_OLDK
     move.l  #BL_BSAT,0xff4c0a
     move.w  #BL_POOL_N,BUL_POOL_N
@@ -242,6 +250,12 @@ BlackStageInit:
     moveq   #BL_QUEUE_N-1,d7
 1:  clr.l   (a0)+
     dbra    d7,1b
+    lea     BL_TCACHE,a0            | 色違いタイルの一覧を空に (面ごとに絵が変わるため)
+    moveq   #BL_TCACHE_N*6/4-1,d7
+2:  clr.l   (a0)+
+    dbra    d7,2b
+    move.w  #TILE_A0,BL_TFREE_A
+    move.w  #TILE_B0,BL_TFREE_B
     movem.l (sp)+,d0/d7/a0
 9:  rts
 
@@ -428,18 +442,137 @@ BlackSpawnInject:
 9:  move.w  #0,(a1,d2.w)
     rts
 
-| 敵の絵の更新 (元: 0x010540 jsr $1e16). 追加分の敵はパレット 2 -> 3 に
+| 敵の絵の更新 (元: 0x010540 jsr $1e16). 追加分の敵は色違いのタイル (パレット 3) で描く.
+| 色違いタイル: パレット 2 で描く部分をパレット 3 で描き, 黄色になる色 8, 12 を深い緑 (色 7) にしたコピー.
 BlackEnemyAnim:
     jsr     0x001e16
     tst.w   OBJ_DUP(a0)
     beq.s   9f
-    movem.l d0/d7/a2,-(sp)
+    movem.l d0-d7/a1-a2,-(sp)
 1:  move.w  4(a2),d0
-    andi.w  #0x6000,d0
-    cmpi.w  #0x4000,d0
+    move.w  d0,d1
+    andi.w  #0x6000,d1
+    cmpi.w  #0x4000,d1
     bne.s   2f
-    ori.w   #0x2000,4(a2)
+    move.w  2(a2),d1                | 大きさ -> 枚数 = (w+1)*(h+1)
+    move.w  d1,d2
+    lsr.w   #8,d1
+    andi.w  #3,d1
+    addq.w  #1,d1
+    lsr.w   #8,d2
+    lsr.w   #2,d2
+    andi.w  #3,d2
+    addq.w  #1,d2
+    mulu    d2,d1
+    move.w  d0,d2
+    andi.w  #0x07ff,d2              | 元のタイル
+    bsr.s   GreenTiles              | -> d3 = コピー先 (0 = 用意できない)
+    tst.w   d3
+    beq.s   2f
+    andi.w  #0x9800,d0              | 優先度・反転はそのまま
+    ori.w   #0x6000,d0              | パレット 3
+    or.w    d3,d0
+    move.w  d0,4(a2)
 2:  addq.l  #8,a2
     dbra    d7,1b
-    movem.l (sp)+,d0/d7/a2
+    movem.l (sp)+,d0-d7/a1-a2
 9:  rts
+
+| d2 = 元のタイル, d1 = 枚数 -> d3 = 色違いのコピー先 (一覧に無ければ作る. 0 = 空きなし)
+GreenTiles:
+    lea     BL_TCACHE,a1
+    moveq   #BL_TCACHE_N-1,d4
+1:  move.w  (a1),d5
+    beq.s   3f                      | 一覧の終わり -> 作る
+    cmp.w   d2,d5
+    bne.s   2f
+    cmp.w   2(a1),d1
+    bne.s   2f
+    move.w  4(a1),d3
+    rts
+2:  addq.l  #6,a1
+    dbra    d4,1b
+    moveq   #0,d3                   | 一覧がいっぱい
+    rts
+3:  move.w  BL_TFREE_A,d3           | コピー先を探す (A, だめなら B)
+    move.w  d3,d5
+    add.w   d1,d5
+    cmpi.w  #TILE_A1,d5
+    bhi.s   4f
+    move.w  d5,BL_TFREE_A
+    bra.s   5f
+4:  move.w  BL_TFREE_B,d3
+    move.w  d3,d5
+    add.w   d1,d5
+    cmpi.w  #TILE_B1,d5
+    bhi.s   8f
+    move.w  d5,BL_TFREE_B
+5:  move.w  d2,(a1)+
+    move.w  d1,(a1)+
+    move.w  d3,(a1)+
+    | 枚数分コピー (VRAM 読み -> 色の置き換え -> 書き込み)
+    move.w  d1,d4
+    subq.w  #1,d4
+    move.w  d2,d5
+    move.w  d3,d6
+6:  bsr.s   CopyGreenTile
+    addq.w  #1,d5
+    addq.w  #1,d6
+    dbra    d4,6b
+    rts
+8:  moveq   #0,d3
+    rts
+
+| VRAM のタイル d5 を色を置き換えてタイル d6 へ写す (d0/d1/d2/d7/a1 を使う. 呼び出し元で保存済み)
+CopyGreenTile:
+    movem.l d0-d2/d7/a1,-(sp)
+    lea     -32(sp),sp              | 32 バイトの作業領域
+    move.w  #0x8f02,VDP_CTRL
+    move.w  d5,d0
+    bsr.s   VramCmd                 | 読み込みコマンド
+    move.l  d0,VDP_CTRL
+    movea.l sp,a1
+    moveq   #7,d7
+1:  move.l  VDP_DATA,(a1)+
+    dbra    d7,1b
+    movea.l sp,a1
+    moveq   #31,d7
+2:  move.b  (a1),d0
+    move.b  d0,d1
+    lsr.b   #4,d0
+    andi.w  #0x0f,d0
+    andi.w  #0x0f,d1
+    move.b  GreenMap(pc,d0.w),d0
+    move.b  GreenMap(pc,d1.w),d1
+    lsl.b   #4,d0
+    or.b    d1,d0
+    move.b  d0,(a1)+
+    dbra    d7,2b
+    move.w  d6,d0
+    bsr.s   VramCmd
+    ori.l   #0x40000000,d0          | 書き込みコマンド
+    move.l  d0,VDP_CTRL
+    movea.l sp,a1
+    moveq   #7,d7
+3:  move.l  (a1)+,VDP_DATA
+    dbra    d7,3b
+    lea     32(sp),sp
+    movem.l (sp)+,d0-d2/d7/a1
+    rts
+
+| 色の置き換え表 (パレット 2 の色番号 -> パレット 3 で描く色番号). 8, 12 (黄色になる) -> 7 (深い緑)
+GreenMap:
+    dc.b    0, 1, 2, 3, 4, 5, 6, 7, 7, 9, 10, 11, 7, 13, 14, 15
+
+| d0 = タイル番号 -> d0 = VRAM 読み込みコマンド (アドレス = タイル * 32)
+VramCmd:
+    andi.l  #0x07ff,d0
+    lsl.l   #5,d0
+    move.l  d0,d1
+    andi.w  #0x3fff,d0
+    swap    d0
+    clr.w   d0
+    lsr.l   #8,d1
+    lsr.l   #6,d1                   | アドレス >> 14
+    or.w    d1,d0
+    rts
