@@ -114,6 +114,19 @@ def hooks(s):
     h.append((0x001fd0, '4dfaf490e74cdcc4', jsr(s['BlackHitbox']) + nop))
     # ザコ敵の移動 (約 1.25 倍速)
     h.append((0x0105b8, '38280014d968001a3a280016db68001c53680012', jsr(s['BlackEnemyMove']) + nop * 7))
+    # 敵弾プールを全ステージ未使用の RAM へ移す (BLACK で 32 発まで広げるため. 通常時も同じ場所を使う)
+    for a in (0x010128, 0x0117b0, 0x0118a0, 0x011aac, 0x0122d6, 0x012e18):
+        h.append((a, '00ff78ca', struct.pack('>I', 0xffa400)))
+    # BLACK: ステージ / ボス戦開始時に敵弾プールを 32 発にし, スプライト枠を専用の表へ
+    h.append((0x00457a, '42b900ff7000', jsr(s['BlackStageInit'])))
+    h.append((0x011e86, '33d900ff601a', jsr(s['BlackBossInit'])))
+    # フレームの最後でスプライト表を詰め直し, DMA の転送元を切り替える
+    h.append((0x001128, '4eb900000326', jsr(s['BlackFrameEnd'])))
+    h.append((0x0013c8, '28bc96989501', struct.pack('>HI', 0x28b9, 0xff3704)))
+    h.append((0x0013fa, '397900ff3002fffc', struct.pack('>HIH', 0x3979, 0xff3708, 0xfffc)))
+    # 追加編隊: 出現リストの最後に追加分を足す / 追加分の敵の色を替える
+    h.append((0x023090, '33c000ff932643f900ff000a', jmp(s['BlackSpawnInject']) + nop * 3))
+    h.append((0x010540, '4eb900001e16', jsr(s['BlackEnemyAnim'])))
     # タイトルで C+START: BLACK LABEL (試作)
     h.append((0x016e36, '33fc000400ff5202', jsr(s['BlackTitleStart']) + nop))
     return h
